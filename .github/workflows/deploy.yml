@@ -1,0 +1,71 @@
+name: Deploy to production
+
+# エックスサーバーの SSH は「国内からのアクセスのみ許可」を維持する前提。
+# 国外 IP の GitHub ホストランナーからは接続できないため、日本の IP を持つ
+# セルフホストランナーで実行する。
+#
+# 制限を OFF にしてよいなら runs-on を ubuntu-latest に変えられる。
+# その場合 defaults.run.shell の指定も不要になる。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'ドライラン（転送せず差分だけ表示する）'
+        type: boolean
+        default: false
+
+# 2つのデプロイが並走すると、manifest の差し替えと旧アセットの削除が
+# 交錯して壊れる。転送中のキャンセルも危険なので中断はしない。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 15
+
+    # 既定の powershell は、サービスの実行アカウント（NETWORK SERVICE）の
+    # 実行ポリシーが Restricted だと GitHub が生成する .ps1 を起動できない。
+    # マシンのポリシーを変えずに済ませるため cmd を使う。
+    # 実行するのは npm と node だけなので cmd で足りる。
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Node をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 依存をインストール
+        run: npm ci
+
+      - name: ビルド
+        run: npm run build
+
+      - name: 転送対象を確認
+        run: node scripts/deploy.mjs --list
+
+      - name: デプロイ
+        run: node scripts/deploy.mjs ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+          XSERVER_USER: ${{ secrets.XSERVER_USER }}
+          XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+          XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}
+          XSERVER_DEPLOY_PATH: ${{ secrets.XSERVER_DEPLOY_PATH }}
+
+      # 200 が返るだけでは無スタイルページを見逃すため、
+      # 配信された HTML が今回のビルドのハッシュを参照しているかまで見る。
+      - name: ヘルスチェック
+        if: ${{ !inputs.dry_run }}
+        run: node scripts/healthcheck.mjs

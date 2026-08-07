@@ -1,0 +1,26 @@
+{
+  "$comment": "このファイルをリポジトリ直下に deploy.config.json という名前でコピーして編集する",
+
+  "themeMarker": "Theme Name: あなたのテーマ名",
+
+  "manifest": "dist/.vite/manifest.json",
+
+  "include": {
+    "rootGlobs": ["*.php"],
+    "rootFiles": ["style.css", "screenshot.png"],
+    "dirs": ["inc", "template-parts", "images", "dist"]
+  },
+
+  "protected": [".htaccess"],
+
+  "healthcheck": {
+    "baseUrl": "https://example.com",
+    "themeUrlPath": "/wp-content/themes/あなたのテーマディレクトリ名",
+    "assetPagePath": "/",
+    "pages": [
+      { "path": "/", "expect": 200 }
+    ],
+    "notFoundPath": "/__healthcheck-not-found__/",
+    "notFoundNeedle": ""
+  }
+}
