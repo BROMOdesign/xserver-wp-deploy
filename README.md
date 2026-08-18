@@ -239,10 +239,12 @@ gh secret set XSERVER_HOST --body "<サーバーID>.xbiz.jp"
 gh secret set XSERVER_USER --body "<サーバーID>"
 gh secret set XSERVER_PORT --body "10022"
 gh secret set XSERVER_DEPLOY_PATH --body "/home/<サーバーID>/.../wp-content/themes/<テーマ>"
-gh secret set XSERVER_SSH_KEY < $HOME\.ssh\<プロジェクト名>_deploy
+Get-Content -Raw $HOME\.ssh\<プロジェクト名>_deploy | gh secret set XSERVER_SSH_KEY
 ```
 
-秘密鍵はファイルからリダイレクトで渡す。画面にも履歴にも残らない。
+秘密鍵は標準入力で渡す。値が argv に載らないので、画面にも履歴にもプロセス一覧にも残らない。
+
+`-Raw` を付けないと1行ずつの配列として渡り、鍵の改行が壊れる。**`<` によるリダイレクトは使えない**（PowerShell では `<` が予約演算子で `ParserError` になる）。
 
 ### 5. セルフホストランナーを入れる
 
