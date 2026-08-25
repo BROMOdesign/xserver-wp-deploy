@@ -63,6 +63,24 @@ async function checkAssets() {
 	const expected = Object.values(manifest).map((entry) => entry.file);
 	const distRoot = config.manifest.split('/')[0];
 
+	// manifest の全エントリが assetPagePath の HTML に出るとは限らない。
+	// ページ別にしか enqueue されない JS や、HTML ではなく CSS から参照される
+	// 背景画像は、正常でも現れない。htmlAssets が指定されていればその
+	// manifest キーだけを必須とし、未指定なら従来どおり全件を必須とする。
+	const htmlAssets = Array.isArray(hc.htmlAssets) ? hc.htmlAssets : null;
+
+	if (htmlAssets) {
+		const unknown = htmlAssets.filter((key) => !manifest[key]);
+
+		if (unknown.length > 0) {
+			ng(`htmlAssets に manifest に無いキーがあります: ${unknown.join(', ')}`);
+		}
+	}
+
+	const required = htmlAssets
+		? htmlAssets.filter((key) => manifest[key]).map((key) => manifest[key].file)
+		: expected;
+
 	const { status, body } = await fetchPage(BASE_URL + (hc.assetPagePath || '/'));
 
 	if (status !== 200) {
@@ -70,12 +88,20 @@ async function checkAssets() {
 		return;
 	}
 
-	for (const file of expected) {
+	if (required.length === 0) {
+		ng('HTML への出現を確認する対象が0件です。htmlAssets の指定を見直してください。');
+	}
+
+	for (const file of required) {
 		if (body.includes(file)) {
 			ok(`HTML が ${file} を参照している`);
 		} else {
 			ng(`HTML に ${file} が現れません（manifest が切り替わっていない可能性）`);
 		}
+	}
+
+	for (const file of expected.filter((f) => !required.includes(f))) {
+		ok(`${file} は HTML 出現の必須対象外（htmlAssets 指定）`);
 	}
 
 	// 参照されているだけでなく、実体が取得できるかまで見る
