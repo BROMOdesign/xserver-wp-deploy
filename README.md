@@ -250,10 +250,16 @@ Get-Content -Raw $HOME\.ssh\<プロジェクト名>_deploy | gh secret set XSERV
 
 **リポジトリの外**に置く。テーマの中に作ると、ランナーが `_work/` にリポジトリを再チェックアウトして入れ子になる。
 
+**ディレクトリ名にリポジトリ名を入れる。** ランナーは「リポジトリ / Organization / Enterprise のいずれか1スコープ」にしか登録できない。リポジトリレベルで運用する限り**案件ごとに1インストールが必要**になるため、固定名にすると2案件目で必ず衝突する。
+
 ```powershell
-mkdir C:\actions-runner
-cd C:\actions-runner
+mkdir C:\actions-runner-<リポジトリ名>
+Set-Location C:\actions-runner-<リポジトリ名>
 ```
+
+> **`Set-Location`（`cd`）を飛ばさないこと。** 既存のランナーのディレクトリにいる状態で展開すると、
+> `C:\actions-runner\actions-runner` のように**別のランナーの配下に入れ子**になる。
+> こうなると親を削除・移動したときに中のランナーも巻き添えで消える。実際に踏んだ事例がある。
 
 `Settings → Actions → Runners → New self-hosted runner` の Download 以降を実行する。`config.cmd` の対話はすべて Enter でよい。ラベルの追加も不要（`self-hosted` `Windows` `X64` が自動で付く）。
 
@@ -290,6 +296,17 @@ npm run deploy -- --init
 2回目以降はガードが効くので `--init` は不要。
 
 CI でも流す。Actions 画面から `dry_run: true` で手動実行 → 問題なければ `false` で実行。
+
+> **サーバーに `git clone` 済みの環境へ初めて入れる場合、初回だけ極端に重くなる。**
+> 許可リストに無いものはすべて削除対象になるため、`.git` / `sample` / `node_modules` が
+> 残っていると削除が数千件に達する（実例: **7,799 件**）。SFTP の逐次削除は遅く、
+> **`deploy.yml` の `timeout-minutes: 15` を超えうる。**
+>
+> **初回はローカルから `npm run deploy` を流す**（タイムアウトが無い）。
+> 先に SSH で `rm -rf` して不要物を落としておくとさらに速い。
+>
+> **デプロイを並走させないこと。** 同じファイルを削除し合って両方失敗する。
+> CI 側は `concurrency` で制御しているが、ローカル実行と CI を同時に走らせると起きる。
 
 ---
 
