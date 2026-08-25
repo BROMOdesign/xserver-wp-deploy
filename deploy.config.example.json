@@ -17,6 +17,10 @@
     "baseUrl": "https://example.com",
     "themeUrlPath": "/wp-content/themes/あなたのテーマディレクトリ名",
     "assetPagePath": "/",
+
+    "$comment_htmlAssets": "assetPagePath の HTML に必ず現れるべき manifest のキー。省略すると manifest の全エントリが必須になる。ページ別にしか読まれない JS や CSS 内の背景画像がある場合は指定する",
+    "htmlAssets": ["src/scss/style.scss", "src/js/main.js"],
+
     "pages": [
       { "path": "/", "expect": 200 }
     ],

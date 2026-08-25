@@ -274,6 +274,25 @@ function planUploads(local, manifestPath) {
 	return [...local.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
+/**
+ * 「そのファイルはもう無い」系のエラーか
+ *
+ * ssh2-sftp-client はサーバー実装によってコードもメッセージも揺れるため、
+ * 数値コードと文言の両方で判定する。
+ */
+function isMissing(error) {
+	if (!error) {
+		return false;
+	}
+
+	// SSH_FX_NO_SUCH_FILE = 2
+	if (error.code === 2 || error.code === 'ENOENT') {
+		return true;
+	}
+
+	return /no such file|not found/i.test(error.message || '');
+}
+
 function planDeletions(local, remote, protectedNames) {
 	const guard = new Set(protectedNames || []);
 
@@ -362,7 +381,16 @@ async function main() {
 		}
 
 		for (const rel of deletions) {
-			await sftp.delete(`${env.remoteRoot}/${rel}`);
+			try {
+				await sftp.delete(`${env.remoteRoot}/${rel}`);
+			} catch (error) {
+				// 既に無いものを消そうとしただけなら、消えているという結果は
+				// 同じなので続行する。手動で掃除した直後や、削除一覧を作って
+				// から実際に消すまでの間にリモートが変わった場合に起きる。
+				if (!isMissing(error)) {
+					throw error;
+				}
+			}
 		}
 
 		const seconds = ((Date.now() - started) / 1000).toFixed(1);
