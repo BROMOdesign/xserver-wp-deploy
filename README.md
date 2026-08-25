@@ -83,6 +83,10 @@ manifest が無い・中身が古いと、URL は空文字になり `if` に握�
 
 事故ったときの被害が軽い方に倒している。
 
+「重大」の方は絵空事ではない。手上げ運用だった既存サイトにこのキットを入れたとき、ドライランの削除予定に `.git/` が 165 ファイル並んだ。テーマディレクトリごと FTP で上げていたため、**`https://<ドメイン>/wp-content/themes/<テーマ>/.git/config` が 200 を返す状態**になっていた。private リポジトリのソースと全コミット履歴が web から復元できる。`src/` も `package.json` も同じく読めた。
+
+`.git/` を上げないよう気をつける、では防げない。**上げるものを列挙する**方式でしか防げない類の事故だと考えている。
+
 ルート直下の `.php` は**グロブで拾う**。個別に列挙すると、あとで `front-page.php` を足したときに黙って転送漏れする。
 
 ### 転送先ガード
@@ -115,7 +119,7 @@ manifest が無い・中身が古いと、URL は空文字になり `if` に握�
 
 GitHub ホストランナーは国外 IP なので、「国内のみ許可」のままでは接続できない。制限を OFF にしたくない場合、**発信元を日本の IP にする**しかなく、自分の PC をランナーにするのが最も手軽になる。
 
-> 制限を OFF にしてよいなら、`deploy.yml` の `runs-on` を `ubuntu-latest` に変えるだけで GitHub ホストランナーで動く。`defaults.run.shell` の指定も不要になる。
+> 制限を OFF にしてよいなら、`deploy.yml` の `runs-on` を `ubuntu-latest` に変えるだけで GitHub ホストランナーで動く。`defaults.run.shell` の指定も不要になる。ランナーが使い捨てになるので、`setup-node` に `cache: npm` を戻したほうがよい（セルフホストでは不要なので外している）。
 
 セルフホストランナーは**private リポジトリで使うこと。** public だと fork からの PR で自分の PC 上で任意のコードが実行されうる。
 
@@ -223,6 +227,14 @@ pwd
 ssh-keygen -t ed25519 -N "" -C "github-actions-<プロジェクト名>" -f ~/.ssh/<プロジェクト名>_deploy
 ```
 
+**これは bash で実行すること。** PowerShell から同じ行を打つと `-N ""` の引数展開でリテラルの `""` 2文字がパスフレーズになる。鍵は一見できているのに CI から使えず、原因が見えにくい。踏んでしまったら作り直さなくてよい。パスフレーズだけ外せる。
+
+```bash
+ssh-keygen -p -P '""' -N '' -f ~/.ssh/<プロジェクト名>_deploy
+```
+
+パスフレーズが付いているかは、暗号化されているとヘッダ直後が `aes256-ctr` になることで見分けられる（付いていなければ `none`）。
+
 公開鍵は**追記**する。サーバーパネルから登録すると既存の鍵が置き換わる可能性があり、普段使いの鍵で入れなくなる恐れがある。
 
 ```bash
@@ -283,6 +295,24 @@ $t = gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token --jq
 
 ```powershell
 Get-Service actions.runner.* | Select-Object Name, Status, StartType
+```
+
+#### 2つ目以降のサイトを同じ PC で回す
+
+ランナーの登録は**リポジトリ単位**なので、2サイト目には2台目のインスタンスが要る。1台の PC に何台でも入れられるが、**ディレクトリを分けること**。
+
+```powershell
+mkdir C:\actions-runner-<プロジェクト名>
+```
+
+`Organization` アカウントなら Organization ランナーにして複数リポジトリで共有できるが、**個人（User）アカウントにこの機能は無い**。owner の種別は `gh api users/<owner> --jq .type` で分かる。
+
+インスタンスごとに別サービスとして常駐する。ラベルは全台同じ（`self-hosted` `Windows` `X64`）だが、ランナーは自分が登録されたリポジトリのジョブしか拾わないので混線しない。
+
+ランナーのアーカイブは使い回してよい。1台目の zip をコピーして展開すれば、ダウンロードを省ける。
+
+```powershell
+Copy-Item C:\actions-runner\actions-runner-win-x64-*.zip C:\actions-runner-<プロジェクト名>
 ```
 
 ### 6. 動作確認
@@ -376,6 +406,10 @@ npm run deploy
 | 差分転送が効かない | `ssh2-sftp-client` に `utimes` が無く、リモートの mtime を合わせられない | 差分判定をやめて毎回全件送る |
 | 削除フェーズで `✗ delete: No such file` | 削除一覧を作ってから実際に消すまでの間に、対象が別プロセスや手作業で消えていた | `SSH_FX_NO_SUCH_FILE` は無視して続行する |
 | デプロイしたのにサイトが 404 | サブドメインが親ドメインの `public_html` 配下にあり、想定したパスと違った | `pwd` で実パスを確認 |
+| 毎回 `Failed to save: "C:\Program failed` の警告が出る | `cache: npm` が PATH 上で先に見つかる Git の `tar.exe` を、パス中のスペースごと渡してしまう | `cache: npm` を外す。セルフホストランナーなら `~/.npm` が残るので元から不要 |
+| `config.cmd --runasservice` が「Needs Administrator privileges」で止まる | 管理者権限なしで実行した。**ランナー登録自体は済んでいる**ため、入れ直そうとしても `already configured` で弾かれる | 管理者 PowerShell で `config.cmd remove --token <remove-token>` してから再設定 |
+| 作った CI 専用鍵で入れない | PowerShell から `ssh-keygen -N ""` を実行し、リテラルの `""` がパスフレーズになっていた | `ssh-keygen -p -P '""' -N '' -f <鍵>` で外す。鍵の作り直しは不要 |
+| デプロイ直後だけ古い画像が返る | エックスサーバーのエッジキャッシュ。サーバー上の実ファイルは新しい | 数十秒待つか `?v=<何か>` を付けて確認する。実体は `ssh` で `ls -l` すれば確かめられる |
 
 ### 毎回すべて送っている理由
 
