@@ -4,6 +4,8 @@ Vite でビルドする WordPress テーマを、**タグを打つだけでエ�
 
 `git clone` してから FTP で `dist/` を手で上げる、という運用をやめるために作った。
 
+案件のリポジトリからは **npm の依存として入れ、CI は再利用可能ワークフローとして呼ぶ**。案件側に置くのは `deploy.config.json` と10行のワークフローだけで、修正はタグを追えば全案件に届く。
+
 ---
 
 ## 何が問題だったのか
@@ -53,9 +55,9 @@ manifest が無い・中身が古いと、URL は空文字になり `if` に握�
 ```
 タグ push (v*)  ─┐
 手動実行        ─┴→ GitHub Actions（セルフホストランナー / 日本の IP）
-                     ↓ npm ci && npm run build      ビルドはここでやる
-                     ↓ node scripts/deploy.mjs      SFTP で転送
-                     ↓ node scripts/healthcheck.mjs 本当に反映されたか確認
+                     ↓ npm ci && npm run build   ビルドはここでやる
+                     ↓ npx xwp-deploy            SFTP で転送
+                     ↓ npx xwp-healthcheck       本当に反映されたか確認
                    エックスサーバー
 ```
 
@@ -119,7 +121,7 @@ manifest が無い・中身が古いと、URL は空文字になり `if` に握�
 
 GitHub ホストランナーは国外 IP なので、「国内のみ許可」のままでは接続できない。制限を OFF にしたくない場合、**発信元を日本の IP にする**しかなく、自分の PC をランナーにするのが最も手軽になる。
 
-> 制限を OFF にしてよいなら、`deploy.yml` の `runs-on` を `ubuntu-latest` に変えるだけで GitHub ホストランナーで動く。`defaults.run.shell` の指定も不要になる。ランナーが使い捨てになるので、`setup-node` に `cache: npm` を戻したほうがよい（セルフホストでは不要なので外している）。
+> 制限を OFF にしてよいなら GitHub ホストランナーで動かせる。呼び出し側から `runner_labels: '["ubuntu-latest"]'` を渡すことになるが、キット側の `defaults.run.shell: cmd` が Windows 前提なので、そこも外す必要がある。ランナーが使い捨てになるので、`setup-node` に `cache: npm` を戻したほうがよい（セルフホストでは不要なので外している）。
 
 セルフホストランナーは**private リポジトリで使うこと。** public だと fork からの PR で自分の PC 上で任意のコードが実行されうる。
 
@@ -134,17 +136,30 @@ GitHub ホストランナーは国外 IP なので、「国内のみ許可」の
 - Vite でビルドする WordPress テーマ（`dist/.vite/manifest.json` を吐く構成）
 - Node.js 22.9 以上
 - リポジトリが **private**
+- `gh` CLI が認証済み（Secrets 登録とランナー導入に使う）
 
-### 1. ファイルを配置する
+### 1. キットを入れる
 
-このリポジトリから、テーマのリポジトリ直下へコピーする。
+テーマのリポジトリで実行する。
 
+```bash
+npm i -D github:BROMOdesign/xserver-wp-deploy#v1
 ```
-scripts/deploy.mjs
-scripts/healthcheck.mjs
-.github/workflows/deploy.yml
-deploy.config.example.json  →  deploy.config.json にリネームして編集
+
+`package.json` に追記する。npm スクリプトからは `node_modules/.bin` に PATH が通るので、コマンド名をそのまま書ける。
+
+```json
+{
+  "engines": { "node": ">=22.9" },
+  "scripts": {
+    "deploy": "xwp-deploy",
+    "deploy:dry": "xwp-deploy --dry-run",
+    "healthcheck": "xwp-healthcheck"
+  }
+}
 ```
+
+`ssh2-sftp-client` はキット側の依存なので書かなくてよい。
 
 `.nvmrc` を作る。
 
@@ -152,25 +167,44 @@ deploy.config.example.json  →  deploy.config.json にリネームして編集
 22
 ```
 
-`package.json` に追記する。
-
-```json
-{
-  "engines": { "node": ">=22.9" },
-  "scripts": {
-    "deploy": "node --env-file-if-exists=.env scripts/deploy.mjs",
-    "deploy:dry": "node --env-file-if-exists=.env scripts/deploy.mjs --dry-run",
-    "healthcheck": "node scripts/healthcheck.mjs"
-  },
-  "devDependencies": { "ssh2-sftp-client": "^12.0.1" }
-}
-```
+`deploy.config.json` を作る（次項）。雛形はここにある。
 
 ```bash
-npm install
+cp node_modules/@bromodesign/xserver-wp-deploy/deploy.config.example.json deploy.config.json
 ```
 
-`.gitignore` に `.env` が入っていることを確認する。
+ワークフローを置く。**中身はキット側にあるので、案件側はこの呼び出しだけ**になる。
+
+`.github/workflows/deploy.yml`:
+
+```yaml
+name: Deploy to production
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'ドライラン（転送せず差分だけ表示する）'
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    uses: BROMOdesign/xserver-wp-deploy/.github/workflows/deploy.yml@v1
+    with:
+      dry_run: ${{ inputs.dry_run || false }}
+    secrets: inherit
+```
+
+同じものがキットのリポジトリの `examples/caller-workflow.yml` にも置いてある。
+
+> **キット側の Access 設定を1度だけやる。**
+> `xserver-wp-deploy` は private なので、`Settings → Actions → General → Access` で
+> 「Accessible from repositories owned by the user 'BROMOdesign'」を有効にしておく。
+> 忘れると呼び出し側が `workflow was not found` で落ちる。
 
 ### 2. deploy.config.json を書く
 
@@ -178,6 +212,12 @@ npm install
 {
   "themeMarker": "Theme Name: my-theme",
   "manifest": "dist/.vite/manifest.json",
+  "server": {
+    "host": "<サーバーID>.xbiz.jp",
+    "user": "<サーバーID>",
+    "port": 10022,
+    "deployPath": "/home/<サーバーID>/<ドメイン>/public_html/wp-content/themes/my-theme"
+  },
   "include": {
     "rootGlobs": ["*.php"],
     "rootFiles": ["style.css", "screenshot.png"],
@@ -198,6 +238,7 @@ npm install
 | キー | 意味 |
 |---|---|
 | `themeMarker` | 転送先ガードで照合する `style.css` 内の文字列 |
+| `server` | 接続情報。**秘密なのは鍵だけ**なので private リポジトリならここに書く。環境変数（`XSERVER_HOST` など）を設定した場合はそちらが優先される |
 | `include` | 転送する対象。**許可リスト** |
 | `protected` | リモートにあってもローカルに無いとき、削除しないファイル名 |
 | `healthcheck.themeUrlPath` | アセットの URL を組み立てるためのテーマのパス |
@@ -208,7 +249,7 @@ npm install
 
 ```bash
 npm run build
-node scripts/deploy.mjs --list
+npx xwp-deploy --list
 ```
 
 ### 3. サーバー側の準備
@@ -249,40 +290,48 @@ ssh -i ~/.ssh/<プロジェクト名>_deploy -o IdentitiesOnly=yes -p 10022 <ユ
 
 ### 4. GitHub Secrets を登録する
 
-**PowerShell か GitHub の画面から登録すること。Git Bash からは絶対にやらない。**
-
-MSYS のパス変換で `/home/...` が `C:/Program Files/Git/home/...` に書き換わって保存される。実際にこれを踏んだ。
+`server` を `deploy.config.json` に書いたなら、**登録するのは秘密鍵だけ**でいい。
 
 ```powershell
-gh secret set XSERVER_HOST --body "<サーバーID>.xbiz.jp"
-gh secret set XSERVER_USER --body "<サーバーID>"
-gh secret set XSERVER_PORT --body "10022"
-gh secret set XSERVER_DEPLOY_PATH --body "/home/<サーバーID>/.../wp-content/themes/<テーマ>"
-Get-Content -Raw $HOME\.ssh\<プロジェクト名>_deploy | gh secret set XSERVER_SSH_KEY
+Get-Content -Raw $HOME\.ssh\xserver_deploy | gh secret set XSERVER_SSH_KEY --repo <owner>/<repo>
 ```
 
 秘密鍵は標準入力で渡す。値が argv に載らないので、画面にも履歴にもプロセス一覧にも残らない。
 
 `-Raw` を付けないと1行ずつの配列として渡り、鍵の改行が壊れる。**`<` によるリダイレクトは使えない**（PowerShell では `<` が予約演算子で `ParserError` になる）。
 
-### 5. セルフホストランナーを入れる
+**鍵は案件ごとに分けなくてよい。** 同じサーバーアカウントなら、どの鍵でも全ドメインの `public_html` に届く。分けたところで漏洩時の被害範囲は変わらず、ローテートのときに全案件を直す手間だけが増える。
 
-**リポジトリの外**に置く。テーマの中に作ると、ランナーが `_work/` にリポジトリを再チェックアウトして入れ子になる。
-
-**ディレクトリ名にリポジトリ名を入れる。** ランナーは「リポジトリ / Organization / Enterprise のいずれか1スコープ」にしか登録できない。リポジトリレベルで運用する限り**案件ごとに1インストールが必要**になるため、固定名にすると2案件目で必ず衝突する。
+接続情報を設定ファイルに置きたくないなら、従来どおり Secrets に入れてもよい。環境変数のほうが `deploy.config.json` の `server` より優先される。
 
 ```powershell
-mkdir C:\actions-runner-<リポジトリ名>
-Set-Location C:\actions-runner-<リポジトリ名>
+gh secret set XSERVER_HOST --body "<サーバーID>.xbiz.jp"
+gh secret set XSERVER_USER --body "<サーバーID>"
+gh secret set XSERVER_PORT --body "10022"
+gh secret set XSERVER_DEPLOY_PATH --body "/home/<サーバーID>/.../wp-content/themes/<テーマ>"
 ```
 
-> **`Set-Location`（`cd`）を飛ばさないこと。** 既存のランナーのディレクトリにいる状態で展開すると、
-> `C:\actions-runner\actions-runner` のように**別のランナーの配下に入れ子**になる。
-> こうなると親を削除・移動したときに中のランナーも巻き添えで消える。実際に踏んだ事例がある。
+**その場合は PowerShell か GitHub の画面から登録すること。Git Bash からは絶対にやらない。** MSYS のパス変換で `/home/...` が `C:/Program Files/Git/home/...` に書き換わって保存され、転送先ガードで弾かれる。実際にこれを踏んだ。
 
-`Settings → Actions → Runners → New self-hosted runner` の Download 以降を実行する。`config.cmd` の対話はすべて Enter でよい。ラベルの追加も不要（`self-hosted` `Windows` `X64` が自動で付く）。
+### 5. セルフホストランナーを入れる
 
-サービス化には**管理者権限**が要る。管理者 PowerShell で実行する。
+**管理者 PowerShell** で、キットに入っているスクリプトを流す。ダウンロード・展開・登録・サービス化までやる（`gh` が認証済みであること）。
+
+```powershell
+.\node_modules\@bromodesign\xserver-wp-deploy\scripts\setup-runner.ps1 -Repo <owner>/<repo>
+```
+
+ランナーの登録スコープは「リポジトリ / Organization / Enterprise のいずれか1つ」で、**個人（User）アカウントに Organization スコープは無い**。つまり**案件ごとに1インストールが必須**で、これは減らせない。減らせないので代わりに丸ごとスクリプトにした。
+
+スクリプトが面倒を見ているもの。上の4つはいずれも実際に踏んだ。
+
+- **ディレクトリ名にリポジトリ名が入る。** 固定名にすると2案件目で必ず衝突する
+- **`C:\actions-runner-<リポジトリ名>` はリポジトリの外に作る。** テーマの中に作ると、ランナーが `_work/` にリポジトリを再チェックアウトして入れ子になる
+- **既存のランナーの配下に展開しない。** `C:\actions-runner\actions-runner` になると、親を消したときに中のランナーも巻き添えで消える
+- **管理者権限が無ければ最初に止まる。** 権限なしで `config.cmd` を走らせると、登録だけ済んでサービス化で失敗し、入れ直そうにも `already configured` で弾かれる
+- **同じ親ディレクトリに zip があれば使い回す。** 2案件目以降のダウンロードを省ける
+
+手でやる場合は `Settings → Actions → Runners → New self-hosted runner` の Download 以降を実行する。`config.cmd` の対話はすべて Enter でよい。ラベルの追加も不要（`self-hosted` `Windows` `X64` が自動で付く）。サービス化には**管理者権限**が要る。
 
 ```powershell
 $t = gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token --jq .token
@@ -299,21 +348,11 @@ Get-Service actions.runner.* | Select-Object Name, Status, StartType
 
 #### 2つ目以降のサイトを同じ PC で回す
 
-ランナーの登録は**リポジトリ単位**なので、2サイト目には2台目のインスタンスが要る。1台の PC に何台でも入れられるが、**ディレクトリを分けること**。
-
-```powershell
-mkdir C:\actions-runner-<プロジェクト名>
-```
+ランナーの登録は**リポジトリ単位**なので、2サイト目には2台目のインスタンスが要る。1台の PC に何台でも入れられる。案件ごとに `setup-runner.ps1` を流せばよく、ディレクトリの分離も zip の使い回しもスクリプトが面倒を見る。
 
 `Organization` アカウントなら Organization ランナーにして複数リポジトリで共有できるが、**個人（User）アカウントにこの機能は無い**。owner の種別は `gh api users/<owner> --jq .type` で分かる。
 
 インスタンスごとに別サービスとして常駐する。ラベルは全台同じ（`self-hosted` `Windows` `X64`）だが、ランナーは自分が登録されたリポジトリのジョブしか拾わないので混線しない。
-
-ランナーのアーカイブは使い回してよい。1台目の zip をコピーして展開すれば、ダウンロードを省ける。
-
-```powershell
-Copy-Item C:\actions-runner\actions-runner-win-x64-*.zip C:\actions-runner-<プロジェクト名>
-```
 
 ### 6. 動作確認
 
@@ -365,7 +404,13 @@ npm run deploy
 npm run healthcheck
 ```
 
-`.env` に接続情報を置く。**秘密鍵は書かなくてよい** — `XSERVER_SSH_KEY` が未設定なら ssh-agent を使う。普段 `ssh <ホスト>` で入れているなら鍵は既にエージェントに載っているので、パスフレーズを外した鍵をディスクに置かずに済む。
+接続情報は `deploy.config.json` の `server` から読むので、**ローカルに `.env` は要らない**。秘密鍵も書かなくてよい — `XSERVER_SSH_KEY` が未設定なら ssh-agent を使う。普段 `ssh <ホスト>` で入れているなら鍵は既にエージェントに載っているので、パスフレーズを外した鍵をディスクに置かずに済む。
+
+接続情報を Secrets 側に置いている案件だけ、ローカル用に `.env` を作る。読み込むには `--env-file-if-exists` を付けて実体を直接呼ぶ（`node_modules/.bin` のラッパーは Node のフラグを受け取れない）。
+
+```json
+"deploy": "node --env-file-if-exists=.env node_modules/@bromodesign/xserver-wp-deploy/scripts/deploy.mjs"
+```
 
 ```
 XSERVER_HOST=<サーバーID>.xbiz.jp
@@ -373,6 +418,8 @@ XSERVER_USER=<サーバーID>
 XSERVER_PORT=10022
 XSERVER_DEPLOY_PATH=/home/<サーバーID>/.../wp-content/themes/<テーマ>
 ```
+
+`.gitignore` に `.env` が入っていることを確認する。
 
 ### フラグ
 
@@ -391,6 +438,37 @@ git checkout v1.0.1
 npm ci && npm run build
 npm run deploy
 ```
+
+---
+
+## 2案件目以降
+
+案件ごとに要るのはこれだけ。
+
+| 作業 | やること |
+|---|---|
+| キットを入れる | `npm i -D github:BROMOdesign/xserver-wp-deploy#v1` |
+| 設定を書く | `deploy.config.json`（`server` を含む） |
+| ワークフローを置く | `examples/caller-workflow.yml` をコピー |
+| 鍵を登録する | `gh secret set XSERVER_SSH_KEY --repo <owner>/<repo>` |
+| ランナーを入れる | `setup-runner.ps1 -Repo <owner>/<repo>`（管理者 PowerShell） |
+
+**CI が要らない案件ならランナーは省ける。** スクリプトは ssh-agent 経由の認証に対応しているので、ローカルから `npm run deploy` だけで完結する。「タグを打ったら自動」が欲しい案件にだけ入れればよい。
+
+### キットを更新する
+
+案件側は `@v1` を参照している。キットに修正を入れたら、`v1` タグを新しいコミットへ移す。
+
+```bash
+git tag -a v1.0.1 -m "v1.0.1"
+git tag -f v1 v1.0.1
+git push origin v1.0.1
+git push -f origin v1
+```
+
+ワークフロー側は次の実行から新しい `v1` を拾う。スクリプト側は案件で `npm update @bromodesign/xserver-wp-deploy` を流したときに入れ替わる。
+
+**壊れる変更を入れるときは `v1` を動かさない。** `v2` を切って、案件ごとに参照を上げる。
 
 ---
 

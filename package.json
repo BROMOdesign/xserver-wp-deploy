@@ -1,0 +1,22 @@
+{
+	"name": "@bromodesign/xserver-wp-deploy",
+	"version": "1.0.0",
+	"description": "Vite でビルドする WordPress テーマをエックスサーバーへ転送・検証するデプロイキット",
+	"license": "MIT",
+	"type": "module",
+	"private": true,
+	"bin": {
+		"xwp-deploy": "scripts/deploy.mjs",
+		"xwp-healthcheck": "scripts/healthcheck.mjs"
+	},
+	"files": [
+		"scripts",
+		"deploy.config.example.json"
+	],
+	"engines": {
+		"node": ">=22.9"
+	},
+	"dependencies": {
+		"ssh2-sftp-client": "^12.0.1"
+	}
+}
