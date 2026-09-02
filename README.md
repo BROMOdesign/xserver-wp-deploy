@@ -125,6 +125,8 @@ GitHub ホストランナーは国外 IP なので、「国内のみ許可」の
 
 セルフホストランナーは**private リポジトリで使うこと。** public だと fork からの PR で自分の PC 上で任意のコードが実行されうる。
 
+これは**案件（テーマ）側のリポジトリの話**。このキット本体は public だが、持っているワークフローは `workflow_call` だけで単体では起動できず、ランナーも登録されていないので該当しない。
+
 サーバー上でビルドしない理由: エックスサーバーには Node.js が標準で入っておらず、nvm を手で入れることになる。共有ホスティングで壊れやすいので避けている。
 
 ---
@@ -201,10 +203,7 @@ jobs:
 
 同じものがキットのリポジトリの `examples/caller-workflow.yml` にも置いてある。
 
-> **キット側の Access 設定を1度だけやる。**
-> `xserver-wp-deploy` は private なので、`Settings → Actions → General → Access` で
-> 「Accessible from repositories owned by the user 'BROMOdesign'」を有効にしておく。
-> 忘れると呼び出し側が `workflow was not found` で落ちる。
+キットのリポジトリは public なので、案件リポジトリが private でも認証は要らない。`npm ci` も `uses:` もそのまま通る。
 
 ### 2. deploy.config.json を書く
 
