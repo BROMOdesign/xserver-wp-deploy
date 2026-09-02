@@ -1,42 +1,81 @@
 name: Deploy to production
 
+# 案件リポジトリから呼び出して使う再利用可能ワークフロー。
+#
+#   jobs:
+#     deploy:
+#       uses: BROMOdesign/xserver-wp-deploy/.github/workflows/deploy.yml@v1
+#       with:
+#         dry_run: ${{ inputs.dry_run || false }}
+#       secrets: inherit
+#
+# 呼び出し元が private リポジトリでも動くが、このリポジトリの
+# Settings → Actions → General → Access で
+# 「Accessible from repositories owned by the user 'BROMOdesign'」
+# を有効にしておく必要がある。忘れると workflow was not found で落ちる。
+#
 # エックスサーバーの SSH は「国内からのアクセスのみ許可」を維持する前提。
 # 国外 IP の GitHub ホストランナーからは接続できないため、日本の IP を持つ
 # セルフホストランナーで実行する。
-#
-# 制限を OFF にしてよいなら runs-on を ubuntu-latest に変えられる。
-# その場合 defaults.run.shell の指定も不要になる。
 on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+  workflow_call:
     inputs:
       dry_run:
         description: 'ドライラン（転送せず差分だけ表示する）'
         type: boolean
         default: false
+      runner_labels:
+        description: 'ランナーのラベル（JSON 配列の文字列）'
+        type: string
+        default: '["self-hosted", "Windows"]'
+      node_version:
+        description: 'Node のバージョン。空なら呼び出し元の .nvmrc を読む'
+        type: string
+        default: ''
+      build_command:
+        description: 'ビルドコマンド'
+        type: string
+        default: 'npm run build'
+    secrets:
+      # 鍵だけが本当の秘密。ホスト・ユーザー・パスは deploy.config.json の
+      # server に書けるので、案件ごとに登録する Secrets はこれ1つで済む。
+      XSERVER_SSH_KEY:
+        required: false
+      # 接続情報を Secrets に入れている既存の案件のための後方互換。
+      # 設定されていれば deploy.config.json の server より優先される。
+      XSERVER_HOST:
+        required: false
+      XSERVER_USER:
+        required: false
+      XSERVER_PORT:
+        required: false
+      XSERVER_DEPLOY_PATH:
+        required: false
 
 # 2つのデプロイが並走すると、manifest の差し替えと旧アセットの削除が
 # 交錯して壊れる。転送中のキャンセルも危険なので中断はしない。
+# グループはリポジトリ単位なので、呼び出し元ごとに独立する。
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
 jobs:
   deploy:
-    runs-on: [self-hosted, Windows]
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
     timeout-minutes: 15
 
     # 既定の powershell は、サービスの実行アカウント（NETWORK SERVICE）の
     # 実行ポリシーが Restricted だと GitHub が生成する .ps1 を起動できない。
     # マシンのポリシーを変えずに済ませるため cmd を使う。
     # 実行するのは npm と node だけなので cmd で足りる。
+    #
+    # ここが cmd 固定なので runner_labels には Windows ランナーを指定すること。
     defaults:
       run:
         shell: cmd
 
     steps:
+      # 呼び出し元（テーマ）のリポジトリが取得される
       - name: リポジトリを取得
         uses: actions/checkout@v7
 
@@ -44,25 +83,32 @@ jobs:
       # npm ci はキャッシュ無しでも数秒で終わり、actions/cache の層は何も稼がない。
       # 逆に Windows では毎回 "Failed to save" の警告が出る。PATH 上で先に見つかる
       # C:\Program Files\Git\usr\bin\tar.exe がスペースで壊れるため。
-      #
-      # runs-on を ubuntu-latest に変えるなら、ランナーが使い捨てになるので
-      # cache: npm を戻したほうがよい。
-      - name: Node をセットアップ
+      - name: Node をセットアップ（.nvmrc）
+        if: ${{ inputs.node_version == '' }}
         uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
 
+      - name: Node をセットアップ（バージョン指定）
+        if: ${{ inputs.node_version != '' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      # デプロイキット本体は呼び出し元の devDependencies から入る
       - name: 依存をインストール
         run: npm ci
 
       - name: ビルド
-        run: npm run build
+        run: ${{ inputs.build_command }}
 
+      # --no を付けて、ローカルに入っていないときに npm レジストリから
+      # 別物を取ってきて実行することがないようにする
       - name: 転送対象を確認
-        run: node scripts/deploy.mjs --list
+        run: npm exec --no -- xwp-deploy --list
 
       - name: デプロイ
-        run: node scripts/deploy.mjs ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: npm exec --no -- xwp-deploy ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
           XSERVER_USER: ${{ secrets.XSERVER_USER }}
@@ -74,4 +120,4 @@ jobs:
       # 配信された HTML が今回のビルドのハッシュを参照しているかまで見る。
       - name: ヘルスチェック
         if: ${{ !inputs.dry_run }}
-        run: node scripts/healthcheck.mjs
+        run: npm exec --no -- xwp-healthcheck
