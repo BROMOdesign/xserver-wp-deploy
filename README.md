@@ -191,11 +191,38 @@ GitHub ホストランナーは国外 IP なので、「国内のみ許可」の
 
 ### 1. キットを入れる
 
-テーマのリポジトリで実行する。
+テーマのリポジトリで実行する。**tarball の URL で入れること。**
 
 ```bash
-npm i -D github:BROMOdesign/xserver-wp-deploy#v1
+npm i -D https://github.com/BROMOdesign/xserver-wp-deploy/archive/refs/tags/v1.1.0.tar.gz
 ```
+
+`npm i -D github:BROMOdesign/xserver-wp-deploy#v1` と書いてはいけない。npm が
+hosted-git-info で正規化するため、`package-lock.json` の `resolved` が
+`git+ssh://` になる。
+
+```
+"resolved": "git+ssh://git@github.com/BROMOdesign/xserver-wp-deploy.git#afcd46a"
+```
+
+CI の `npm ci` はこの URL で取りに行くので、**ランナーのサービスアカウント
+（NETWORK SERVICE）から github.com へ SSH できる必要が出てくる。** 手順5の
+ランナー導入はその鍵を用意しないため、キットが public であること（＝認証が
+要らないこと）の利点がここで失われる。`git+https://` と書いても同じ形に
+正規化されるので回避できない。
+
+tarball URL なら匿名の HTTPS GET で取れ、git も認証も要らない。lock に
+integrity ハッシュが載るので `npm ci` は完全に再現する。
+
+```
+"resolved": "https://github.com/.../archive/refs/tags/v1.1.0.tar.gz",
+"integrity": "sha512-nh61D+YySEGcNgN/B3K8CTVe4wqHkbWAVrm1..."
+```
+
+代償として `v1` の移動タグには追従せず、更新はこの URL のバージョンを上げる
+明示的な操作になる。**ただし移動タグが本当に効いてほしいのは再利用ワーク
+フローの方**で、そちらは `uses: ...@v1` が追い続けるので意図は保たれる。
+スクリプトが黙って入れ替わらない分、むしろ挙動を追いやすい。
 
 `package.json` に追記する。npm スクリプトからは `node_modules/.bin` に PATH が通るので、コマンド名をそのまま書ける。
 
@@ -518,7 +545,7 @@ npm run deploy
 
 | 作業 | やること |
 |---|---|
-| キットを入れる | `npm i -D github:BROMOdesign/xserver-wp-deploy#v1` |
+| キットを入れる | `npm i -D https://github.com/BROMOdesign/xserver-wp-deploy/archive/refs/tags/<version>.tar.gz`（**`github:` 短縮形は使わない**） |
 | 設定を書く | `deploy.config.json`（`server` を含む） |
 | ワークフローを置く | `examples/caller-workflow.yml` をコピー |
 | 鍵を登録する | `gh secret set XSERVER_SSH_KEY --repo <owner>/<repo>` |
@@ -537,7 +564,7 @@ git push origin v1.0.1
 git push -f origin v1
 ```
 
-ワークフロー側は次の実行から新しい `v1` を拾う。スクリプト側は案件で `npm update @bromodesign/xserver-wp-deploy` を流したときに入れ替わる。
+ワークフロー側は次の実行から新しい `v1` を拾う。**スクリプト側は tarball の URL を固定しているので自動では追従しない。** 案件ごとに `package.json` の URL のバージョンを上げて `npm i` を流す。
 
 **壊れる変更を入れるときは `v1` を動かさない。** `v2` を切って、案件ごとに参照を上げる。
 
