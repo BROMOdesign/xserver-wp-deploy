@@ -3,7 +3,9 @@
 
   "themeMarker": "Theme Name: あなたのテーマ名",
 
+  "$comment_build": "ビルド成果物の指定。Vite なら manifest、sass CLI のように固定パスへ吐くビルドなら assets を使う。排他でどちらか必須",
   "manifest": "dist/.vite/manifest.json",
+  "$comment_assets": "assets モードの例（manifest と入れ替えて使う）: \"assets\": [\"src/css/style.min.css\"]。配信された中身の sha256 をローカルのビルド成果物と照合するので、ファイル名にハッシュが無くても古い成果物を見抜ける",
 
   "$comment_server": "接続情報。秘密なのは鍵だけなので、private リポジトリならここに書いてよい。書いておくと案件ごとに登録する GitHub Secrets が XSERVER_SSH_KEY の1つで済む。環境変数（XSERVER_HOST など）を設定した場合はそちらが優先される",
   "server": {
