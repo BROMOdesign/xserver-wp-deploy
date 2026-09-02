@@ -54,10 +54,29 @@ async function loadConfig() {
 
 	const config = JSON.parse(await readFile(CONFIG_PATH, 'utf8'));
 
-	for (const key of ['themeMarker', 'manifest', 'include']) {
+	for (const key of ['themeMarker', 'include']) {
 		if (!config[key]) {
 			fail(`deploy.config.json に ${key} がありません。`);
 		}
+	}
+
+	// ビルド成果物の指定方法は2つある。Vite なら manifest、固定パスに吐く
+	// ビルド（sass CLI など）なら assets を使う。どちらも「ビルドが走ったか」
+	// 「壊れていないか」を判定する材料なので、片方は必ず要る。両方あると
+	// 転送順の基準が二重になるため排他にする。
+	const hasManifest = Boolean(config.manifest);
+	const hasAssets = Array.isArray(config.assets) && config.assets.length > 0;
+
+	if (hasManifest && hasAssets) {
+		fail('deploy.config.json の manifest と assets は同時に指定できません。どちらか一方にしてください。');
+	}
+
+	if (!hasManifest && !hasAssets) {
+		fail(
+			'deploy.config.json に manifest か assets がありません。\n' +
+				'  Vite でビルドするなら manifest（例 "dist/.vite/manifest.json"）、\n' +
+				'  固定パスに吐くビルドなら assets（例 ["src/css/style.min.css"]）を指定してください。'
+		);
 	}
 
 	return config;
@@ -192,6 +211,10 @@ async function collectLocal(config) {
  * 本番で気付きにくいので、ここで確実に落とす。
  */
 async function preflight(config, files) {
+	if (config.assets) {
+		return preflightAssets(config, files);
+	}
+
 	if (!files.has(config.manifest)) {
 		fail(`${config.manifest} がありません。先に npm run build を実行してください。`);
 	}
@@ -213,6 +236,35 @@ async function preflight(config, files) {
 	}
 
 	return entries.map((entry) => entry.file);
+}
+
+/**
+ * assets モードのビルド検証
+ *
+ * 固定パスなので manifest モードのような「無スタイルなのに 200」は起きない。
+ * URL が空文字にならないため、成果物が落ちていれば素直に 404 になる。
+ *
+ * 代わりにここで効くのは存在チェックそのもの。ビルド成果物は .gitignore して
+ * あるのが普通で、checkout 直後には存在しない。つまり「そこにあるか」が
+ * そのまま「ビルドが走ったか」の判定になる。
+ */
+function preflightAssets(config, files) {
+	for (const rel of config.assets) {
+		const info = files.get(rel);
+
+		if (!info) {
+			fail(
+				`${rel} がありません。先に npm run build を実行してください。\n` +
+					'  ビルド済みなら include に含まれていない可能性があります（--list で転送対象を確認できます）。'
+			);
+		}
+
+		if (info.size === 0) {
+			fail(`${rel} が空です。ビルドをやり直してください。`);
+		}
+	}
+
+	return [...config.assets];
 }
 
 // ------------------------------------------------------------------
@@ -289,7 +341,20 @@ async function guardRemote(sftp, remoteRoot, marker) {
  * 落とすと、バイト数が変わらない書き換え（1文字の修正など）を取りこぼし、
  * しかもそれが無言で起きる。テーマ規模なら数十秒なので確実さを取る。
  */
-function planUploads(local, manifestPath) {
+function planUploads(local, config) {
+	if (config.assets) {
+		// ハッシュ付きの名前が無いので、manifest モードのような原子的な
+		// 切り替えは成立しない（同名を上書きするため）。それでも PHP や
+		// 画像を先に送り、最後にスタイルシートを差し替える順にしておく。
+		// 転送が途中で落ちたときに「新しい CSS だけが当たった中途半端な
+		// 状態」になるのを避けられる。
+		const assets = new Set(config.assets);
+		const rank = (rel) => (assets.has(rel) ? 1 : 0);
+
+		return [...local.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+	}
+
+	const manifestPath = config.manifest;
 	const distRoot = manifestPath.split('/')[0];
 
 	// アップロード順序が切り替えの原子性を担保する。
@@ -383,7 +448,7 @@ async function main() {
 		await guardRemote(sftp, env.remoteRoot, config.themeMarker);
 
 		const remote = await collectRemote(sftp, env.remoteRoot);
-		const uploads = planUploads(local, config.manifest);
+		const uploads = planUploads(local, config);
 		const deletions = planDeletions(local, remote, config.protected);
 
 		log(`リモートの既存ファイル: ${remote.size}`);
