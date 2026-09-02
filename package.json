@@ -1,6 +1,6 @@
 {
 	"name": "@bromodesign/xserver-wp-deploy",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"description": "Vite でビルドする WordPress テーマをエックスサーバーへ転送・検証するデプロイキット",
 	"license": "MIT",
 	"type": "module",
