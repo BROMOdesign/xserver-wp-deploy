@@ -1,16 +1,21 @@
+#!/usr/bin/env node
 /**
  * WordPress テーマをエックスサーバーへ SFTP 転送する
  *
  * 使い方:
- *   node scripts/deploy.mjs [--dry-run] [--init] [--list]
+ *   npx xwp-deploy [--dry-run] [--init] [--list]
  *
  *   --dry-run  転送・削除を行わず、実行予定の一覧だけを出す
  *   --init     転送先ガード（Theme Name 照合）を飛ばす。空ディレクトリへの初回投入用
  *   --list     サーバーに接続せず、転送対象のファイル一覧だけを出して終了する
  *
- * 設定はリポジトリ直下の deploy.config.json を読む。
+ * 設定も転送対象も「実行したディレクトリ」を基準に解決する。テーマのルートで
+ * 実行すること。別の場所から動かすなら DEPLOY_ROOT でルートを指定する。
  *
- * 必要な環境変数（CI では GitHub Secrets、ローカルでは .env）:
+ * 接続情報は環境変数か deploy.config.json の server から読む（環境変数が優先）。
+ * 秘密にする必要があるのは鍵だけなので、host / user / port / deployPath は
+ * private リポジトリなら deploy.config.json に書いてよい。
+ *
  *   XSERVER_HOST / XSERVER_USER / XSERVER_PORT / XSERVER_DEPLOY_PATH
  *   XSERVER_SSH_KEY（未設定なら ssh-agent を使う）
  */
@@ -18,10 +23,11 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import SftpClient from 'ssh2-sftp-client';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// スクリプトの位置ではなく実行したディレクトリを基準にする。node_modules の
+// 中から起動されてもテーマのルートを見失わないようにするため。
+const ROOT = path.resolve(process.env.DEPLOY_ROOT || process.cwd());
 const CONFIG_PATH = path.join(ROOT, 'deploy.config.json');
 
 const flags = new Set(process.argv.slice(2));
@@ -40,7 +46,10 @@ function fail(msg) {
 
 async function loadConfig() {
 	if (!existsSync(CONFIG_PATH)) {
-		fail('deploy.config.json がありません。deploy.config.example.json をコピーして作成してください。');
+		fail(
+			`deploy.config.json がありません: ${CONFIG_PATH}\n` +
+				'  テーマのルートで実行しているか確認してください。'
+		);
 	}
 
 	const config = JSON.parse(await readFile(CONFIG_PATH, 'utf8'));
@@ -84,21 +93,40 @@ function resolveAuth() {
 	fail('XSERVER_SSH_KEY が未設定で、ssh-agent も見つかりません。どちらかを用意してください。');
 }
 
-function readEnv() {
-	const required = ['XSERVER_HOST', 'XSERVER_USER', 'XSERVER_DEPLOY_PATH'];
-	const missing = required.filter((key) => !process.env[key]);
+/**
+ * 接続情報は環境変数を優先し、無ければ deploy.config.json の server を見る
+ *
+ * ホスト名・ユーザー名・パス・ポートは秘密ではなく案件ごとの設定なので、
+ * private リポジトリなら設定ファイルに書いてよい。そうすると案件ごとに
+ * 登録する GitHub Secrets が XSERVER_SSH_KEY の1つだけで済む。
+ * 環境変数を先に見るので、4つとも Secrets に入れてある既存の案件も動く。
+ */
+function readEnv(config) {
+	const server = config.server || {};
+
+	const host = process.env.XSERVER_HOST || server.host;
+	const username = process.env.XSERVER_USER || server.user;
+	const deployPath = process.env.XSERVER_DEPLOY_PATH || server.deployPath;
+
+	const missing = [
+		[host, 'XSERVER_HOST / server.host'],
+		[username, 'XSERVER_USER / server.user'],
+		[deployPath, 'XSERVER_DEPLOY_PATH / server.deployPath'],
+	]
+		.filter(([value]) => !value)
+		.map(([, label]) => label);
 
 	if (missing.length > 0) {
-		fail(`環境変数が足りません: ${missing.join(', ')}`);
+		fail(`接続情報が足りません: ${missing.join(', ')}`);
 	}
 
 	return {
-		host: process.env.XSERVER_HOST,
-		username: process.env.XSERVER_USER,
-		port: Number(process.env.XSERVER_PORT || 10022),
+		host,
+		username,
+		port: Number(process.env.XSERVER_PORT || server.port || 10022),
 		auth: resolveAuth(),
 		// 末尾のスラッシュを落として以降のパス結合を揃える
-		remoteRoot: process.env.XSERVER_DEPLOY_PATH.replace(/\/+$/, ''),
+		remoteRoot: deployPath.replace(/\/+$/, ''),
 	};
 }
 
@@ -328,7 +356,7 @@ async function main() {
 		return;
 	}
 
-	const env = readEnv();
+	const env = readEnv(config);
 
 	log(`デプロイ先: ${env.username}@${env.host}:${env.port}`);
 	log(`パス:       ${env.remoteRoot}`);
