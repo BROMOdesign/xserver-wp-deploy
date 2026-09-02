@@ -12,10 +12,16 @@
  * そこでローカルの manifest が指すハッシュ付きファイル名が、実際に配信
  * された HTML に現れているかまで確かめる。一致すれば「manifest と assets
  * が同一ビルドで揃った状態で公開されている」ことの証明になる。
+ *
+ * assets モード（固定パスに吐くビルド）にはハッシュ付きの名前が無いため、
+ * 「HTML に現れるか」だけでは古いままの成果物を見抜けない。パスは新旧で
+ * 同じだからだ。そこで配信された中身の sha256 をローカルのビルド成果物と
+ * 突き合わせる。ファイル名で担保できないものを中身で担保する。
  */
 
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 // deploy.mjs と同じく、実行したディレクトリを基準にする
@@ -60,6 +66,10 @@ async function fetchPage(url) {
  */
 async function checkAssets() {
 	console.log('\n[1] 配信されたアセットが最新ビルドと一致するか');
+
+	if (config.assets) {
+		return checkFixedPathAssets();
+	}
 
 	const manifest = JSON.parse(await readFile(path.join(ROOT, config.manifest), 'utf8'));
 	const expected = Object.values(manifest).map((entry) => entry.file);
@@ -116,6 +126,81 @@ async function checkAssets() {
 			ok(`${file} が取得できる（${length} bytes）`);
 		} else {
 			ng(`${file} の取得に失敗（status ${response.status} / ${length} bytes）`);
+		}
+	}
+}
+
+function sha256(buffer) {
+	return createHash('sha256').update(buffer).digest('hex');
+}
+
+async function fetchBytes(url) {
+	const response = await fetch(url, { headers: { 'User-Agent': 'deploy-healthcheck' } });
+	return { status: response.status, bytes: Buffer.from(await response.arrayBuffer()) };
+}
+
+/**
+ * assets モードの検証
+ *
+ * パスが固定なので「HTML に出るか」「200 か」だけでは、前回のビルドが
+ * 残っていても全部通ってしまう。中身のハッシュまで見て初めて「今回の
+ * ビルドが配信されている」と言える。
+ *
+ * ハッシュが食い違ったときは、エックスサーバーのエッジキャッシュが
+ * 直前の内容を返しているだけのことがある。実体はもう入れ替わっている
+ * ので、少し待って取り直す。
+ */
+async function checkFixedPathAssets() {
+	if (!hc.themeUrlPath) {
+		ng('healthcheck.themeUrlPath がありません。assets の URL を組み立てられません。');
+		return;
+	}
+
+	const { status, body } = await fetchPage(BASE_URL + (hc.assetPagePath || '/'));
+
+	if (status !== 200) {
+		ng(`${hc.assetPagePath || '/'} が ${status} を返しました（200 を期待）`);
+		return;
+	}
+
+	for (const rel of config.assets) {
+		if (body.includes(rel)) {
+			ok(`HTML が ${rel} を参照している`);
+		} else {
+			ng(`HTML に ${rel} が現れません（enqueue されていない可能性）`);
+		}
+	}
+
+	for (const rel of config.assets) {
+		const local = await readFile(path.join(ROOT, rel));
+		const expected = sha256(local);
+		const url = `${BASE_URL}${hc.themeUrlPath}/${rel}`;
+
+		let last = null;
+
+		// 3回まで見て、それでも合わなければ本当に古い
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			last = await fetchBytes(url);
+
+			if (last.status === 200 && sha256(last.bytes) === expected) {
+				ok(`${rel} が今回のビルドと一致（${last.bytes.length} bytes / sha256 ${expected.slice(0, 12)}）`);
+				break;
+			}
+
+			if (attempt < 3) {
+				console.log(`  … ${rel} がまだ一致しません。エッジキャッシュの可能性があるので 5 秒待って再取得します（${attempt}/3）`);
+				await new Promise((resolve) => setTimeout(resolve, 5000));
+			}
+		}
+
+		if (last.status !== 200) {
+			ng(`${rel} の取得に失敗（status ${last.status}）`);
+		} else if (sha256(last.bytes) !== expected) {
+			ng(
+				`${rel} が今回のビルドと一致しません（転送されていない可能性）\n` +
+					`      ローカル: sha256 ${expected} / ${local.length} bytes\n` +
+					`      配信中:   sha256 ${sha256(last.bytes)} / ${last.bytes.length} bytes`
+			);
 		}
 	}
 }
