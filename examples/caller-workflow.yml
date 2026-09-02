@@ -19,4 +19,15 @@ jobs:
     uses: BROMOdesign/xserver-wp-deploy/.github/workflows/deploy.yml@v1
     with:
       dry_run: ${{ inputs.dry_run || false }}
-    secrets: inherit
+    # secrets: inherit は使わない。呼び出し元とこのキットの owner が違う場合
+    # （例 corp-bromo-web の案件から BROMOdesign のキットを呼ぶ）、inherit では
+    # 鍵が空のまま渡り、スクリプトが ssh-agent へフォールバックして
+    # 「All configured authentication methods failed」で落ちる。
+    # 明示的に渡せば owner の関係に依存しない。
+    secrets:
+      XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}
+      # 接続情報も Secrets 側に置いている案件だけ、以下も渡す
+      # XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+      # XSERVER_USER: ${{ secrets.XSERVER_USER }}
+      # XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+      # XSERVER_DEPLOY_PATH: ${{ secrets.XSERVER_DEPLOY_PATH }}
