@@ -274,10 +274,31 @@ jobs:
     uses: BROMOdesign/xserver-wp-deploy/.github/workflows/deploy.yml@v1
     with:
       dry_run: ${{ inputs.dry_run || false }}
-    secrets: inherit
+    # secrets: inherit は使わない。呼び出し元とこのキットの owner が違う場合
+    # （例 corp-bromo-web の案件から BROMOdesign のキットを呼ぶ）、inherit では
+    # 鍵が空のまま渡り、スクリプトが ssh-agent へフォールバックして
+    # 「All configured authentication methods failed」で落ちる。
+    # 明示的に渡せば owner の関係に依存しない。
+    secrets:
+      XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}
+      # 接続情報も Secrets 側に置いている案件だけ、以下も渡す
+      # XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+      # XSERVER_USER: ${{ secrets.XSERVER_USER }}
+      # XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+      # XSERVER_DEPLOY_PATH: ${{ secrets.XSERVER_DEPLOY_PATH }}
 ```
 
 同じものがキットのリポジトリの `examples/caller-workflow.yml` にも置いてある。
+
+**`secrets: inherit` と書いてはいけない。** 案件リポジトリとこのキットの owner が違うと（例: `corp-bromo-web` の案件から `BROMOdesign` のキットを呼ぶ）、`inherit` では鍵が空のまま渡る。スクリプトは `XSERVER_SSH_KEY` が無ければ ssh-agent へフォールバックする作りなので、ランナーのサービスアカウント（NETWORK SERVICE）にエージェントが無く、こう落ちる。
+
+```
+認証:       ssh-agent（\\.\pipe\openssh-ssh-agent）
+
+✗ getConnection: All configured authentication methods failed
+```
+
+**Secrets は正しく登録されているのにこのエラーが出る** ので、鍵や登録方法を疑って時間を溶かしやすい。ログの「認証:」の行が `秘密鍵（XSERVER_SSH_KEY）` になっているかで切り分けられる。
 
 キットのリポジトリは public なので、案件リポジトリが private でも認証は要らない。`npm ci` も `uses:` もそのまま通る。
 
@@ -563,6 +584,7 @@ git push -f origin v1
 | デプロイしたのにサイトが 404 | サブドメインが親ドメインの `public_html` 配下にあり、想定したパスと違った | `pwd` で実パスを確認 |
 | 毎回 `Failed to save: "C:\Program failed` の警告が出る | `cache: npm` が PATH 上で先に見つかる Git の `tar.exe` を、パス中のスペースごと渡してしまう | `cache: npm` を外す。セルフホストランナーなら `~/.npm` が残るので元から不要 |
 | `config.cmd --runasservice` が「Needs Administrator privileges」で止まる | 管理者権限なしで実行した。**ランナー登録自体は済んでいる**ため、入れ直そうとしても `already configured` で弾かれる | 管理者 PowerShell で `config.cmd remove --token <remove-token>` してから再設定 |
+| Secrets は登録済みなのに `All configured authentication methods failed` | 案件とキットの owner が違い、`secrets: inherit` では鍵が空のまま渡っていた。スクリプトが ssh-agent にフォールバックし、NETWORK SERVICE にエージェントが無いので失敗する | 呼び出し側で `secrets: XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}` と明示的に渡す。ログの「認証:」行で切り分けられる |
 | 作った CI 専用鍵で入れない | PowerShell から `ssh-keygen -N ""` を実行し、リテラルの `""` がパスフレーズになっていた | `ssh-keygen -p -P '""' -N '' -f <鍵>` で外す。鍵の作り直しは不要 |
 | デプロイ直後だけ古い画像が返る | エックスサーバーのエッジキャッシュ。サーバー上の実ファイルは新しい | 数十秒待つか `?v=<何か>` を付けて確認する。実体は `ssh` で `ls -l` すれば確かめられる |
 
