@@ -1,9 +1,17 @@
 {
-  "$comment": "このファイルをリポジトリ直下に deploy.config.json という名前でコピーして編集する",
+  "$comment": "このファイルをテーマのリポジトリ直下に deploy.config.json という名前でコピーして編集する",
 
   "themeMarker": "Theme Name: あなたのテーマ名",
 
   "manifest": "dist/.vite/manifest.json",
+
+  "$comment_server": "接続情報。秘密なのは鍵だけなので、private リポジトリならここに書いてよい。書いておくと案件ごとに登録する GitHub Secrets が XSERVER_SSH_KEY の1つで済む。環境変数（XSERVER_HOST など）を設定した場合はそちらが優先される",
+  "server": {
+    "host": "<サーバーID>.xbiz.jp",
+    "user": "<サーバーID>",
+    "port": 10022,
+    "deployPath": "/home/<サーバーID>/<ドメイン>/public_html/wp-content/themes/<テーマ>"
+  },
 
   "include": {
     "rootGlobs": ["*.php"],

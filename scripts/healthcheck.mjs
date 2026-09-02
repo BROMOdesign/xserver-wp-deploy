@@ -1,8 +1,9 @@
+#!/usr/bin/env node
 /**
  * デプロイ後の検証
  *
  * 使い方:
- *   node scripts/healthcheck.mjs [baseUrl]
+ *   npx xwp-healthcheck [baseUrl]
  *
  * 「200 が返るか」だけでは不十分。Vite の manifest が読めないとテーマは
  * アセット URL に空文字を返し、enqueue 側がそれを握り潰すため、CSS/JS が
@@ -16,13 +17,14 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// deploy.mjs と同じく、実行したディレクトリを基準にする
+const ROOT = path.resolve(process.env.DEPLOY_ROOT || process.cwd());
 const CONFIG_PATH = path.join(ROOT, 'deploy.config.json');
 
 if (!existsSync(CONFIG_PATH)) {
-	console.error('✗ deploy.config.json がありません。');
+	console.error(`✗ deploy.config.json がありません: ${CONFIG_PATH}`);
+	console.error('  テーマのルートで実行しているか確認してください。');
 	process.exit(1);
 }
 
