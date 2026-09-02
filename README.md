@@ -1,8 +1,10 @@
 # xserver-wp-deploy
 
-Vite でビルドする WordPress テーマを、**タグを打つだけでエックスサーバーへ反映する**ための一式。
+ビルドを伴う WordPress テーマを、**タグを打つだけでエックスサーバーへ反映する**ための一式。
 
-`git clone` してから FTP で `dist/` を手で上げる、という運用をやめるために作った。
+`git clone` してから FTP でビルド成果物を手で上げる、という運用をやめるために作った。
+
+ビルド成果物の指定方法が2つある。**Vite** なら `manifest`（`dist/.vite/manifest.json`）を、**sass CLI のように固定パスへ吐くビルド**なら `assets`（`["src/css/style.min.css"]` など）を指定する。以降の説明は主に manifest モードを例にしているが、assets モードでも手順は同じで、違いは「配信されている成果物が今回のビルドかをどう確かめるか」だけ。→ [固定パスのビルド（assets モード）](#固定パスのビルドassets-モード)
 
 案件のリポジトリからは **npm の依存として入れ、CI は再利用可能ワークフローとして呼ぶ**。案件側に置くのは `deploy.config.json` と10行のワークフローだけで、修正はタグを追えば全案件に届く。
 
@@ -109,6 +111,51 @@ manifest が無い・中身が古いと、URL は空文字になり `if` に握�
 
 ---
 
+## 固定パスのビルド（assets モード）
+
+Vite を使わないテーマもある。`sass src/scss/style.scss src/css/style.min.css` のように**決まった名前で吐くビルド**がそれで、その場合は `manifest` の代わりに `assets` へ成果物のパスを並べる。
+
+```json
+{
+  "assets": ["src/css/style.min.css"]
+}
+```
+
+`manifest` と `assets` は排他で、どちらか一方が必須。両方書くとエラーになる。
+
+### manifest モードとの違いは検査の仕方だけ
+
+上に書いた「壊れても 200 が返る」は **Vite 固有の壊れ方**で、assets モードには起きない。テーマが `get_vite_asset()` の空文字を握り潰すから無言で無スタイルになるのであって、URL が固定パスなら成果物が落ちていれば素直に 404 になるからだ。**無い病気の薬は要らない。**
+
+代わりに assets モードには別の弱点がある。**ファイル名が新旧で同じ**なので、「HTML に出ているか」「200 が返るか」をいくら見ても、前回のビルドが残ったままなのを見抜けない。ハッシュ付きの名前が担保してくれていたものが無い。
+
+そこで**配信された中身の sha256 をローカルのビルド成果物と突き合わせる。** 名前で担保できないものを中身で担保する。バイト数が偶然一致する書き換えも取りこぼさない。
+
+食い違ったときはエックスサーバーのエッジキャッシュが直前の内容を返しているだけのことがあるので、5秒間隔で3回まで取り直してから落とす。それでも合わなければ両方のハッシュを出して失敗させる。
+
+### キャッシュバスターは自分で用意する
+
+ハッシュ付きファイル名が無いということは、**ブラウザキャッシュを外す仕組みも無い**ということ。`wp_enqueue_style()` の第4引数にバージョンを直書きしていると、デプロイしても閲覧者には古い CSS が出続ける。`filemtime()` を使う。
+
+```php
+wp_enqueue_style(
+	'theme-style',
+	get_theme_file_uri() . '/src/css/style.min.css',
+	array(),
+	filemtime( get_theme_file_path() . '/src/css/style.min.css' )
+);
+```
+
+### ビルド成果物は .gitignore したままにする
+
+`assets` に挙げたパスは、**checkout 直後には存在しない**のが正しい状態。ランナーが `npm run build` して初めて生まれる。だから「そこにあるか」の検査がそのまま「ビルドが走ったか」の検査になる。成果物をコミットしてしまうとこの保証が消える。
+
+### ソースマップを本番に出さない
+
+sass CLI は既定でソースマップを吐く。`src/css` を丸ごと転送すると `style.min.css.map` も一緒に上がり、**SCSS のソースが本番から読める。** ビルドコマンドに `--no-source-map` を付ける。
+
+---
+
 ## なぜセルフホストランナーなのか
 
 エックスサーバーの SSH には制約がある。
@@ -135,7 +182,9 @@ GitHub ホストランナーは国外 IP なので、「国内のみ許可」の
 
 ### 0. 前提
 
-- Vite でビルドする WordPress テーマ（`dist/.vite/manifest.json` を吐く構成）
+- ビルドを伴う WordPress テーマ。次のどちらか
+  - **Vite**（`dist/.vite/manifest.json` を吐く構成）→ `manifest` を指定する
+  - **固定パスに吐くビルド**（sass CLI など）→ `assets` を指定する（[assets モード](#固定パスのビルドassets-モード)）
 - Node.js 22.9 以上
 - リポジトリが **private**
 - `gh` CLI が認証済み（Secrets 登録とランナー導入に使う）
@@ -237,11 +286,13 @@ jobs:
 | キー | 意味 |
 |---|---|
 | `themeMarker` | 転送先ガードで照合する `style.css` 内の文字列 |
+| `manifest` | Vite の manifest のパス。`assets` と排他でどちらか必須 |
+| `assets` | 固定パスに吐くビルドの成果物パス（テーマルート相対）の配列。`manifest` と排他でどちらか必須 |
 | `server` | 接続情報。**秘密なのは鍵だけ**なので private リポジトリならここに書く。環境変数（`XSERVER_HOST` など）を設定した場合はそちらが優先される |
 | `include` | 転送する対象。**許可リスト** |
 | `protected` | リモートにあってもローカルに無いとき、削除しないファイル名 |
 | `healthcheck.themeUrlPath` | アセットの URL を組み立てるためのテーマのパス |
-| `healthcheck.htmlAssets` | `assetPagePath` の HTML に必ず現れるべき manifest のキー。省略すると manifest の全エントリが必須 |
+| `healthcheck.htmlAssets` | `assetPagePath` の HTML に必ず現れるべき manifest のキー。省略すると manifest の全エントリが必須。**manifest モードのみ** |
 | `healthcheck.notFoundNeedle` | `404.php` にしか無い文言。空にするとこのチェックを飛ばす |
 
 転送対象が正しいか、**サーバーに繋がずに**確認できる。
