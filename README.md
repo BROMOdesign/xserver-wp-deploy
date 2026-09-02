@@ -194,7 +194,7 @@ GitHub ホストランナーは国外 IP なので、「国内のみ許可」の
 テーマのリポジトリで実行する。**tarball の URL で入れること。**
 
 ```bash
-npm i -D https://github.com/BROMOdesign/xserver-wp-deploy/archive/refs/tags/v1.1.0.tar.gz
+npm i -D https://github.com/BROMOdesign/xserver-wp-deploy/archive/refs/tags/v1.1.1.tar.gz
 ```
 
 `npm i -D github:BROMOdesign/xserver-wp-deploy#v1` と書いてはいけない。npm が
@@ -215,7 +215,7 @@ tarball URL なら匿名の HTTPS GET で取れ、git も認証も要らない�
 integrity ハッシュが載るので `npm ci` は完全に再現する。
 
 ```
-"resolved": "https://github.com/.../archive/refs/tags/v1.1.0.tar.gz",
+"resolved": "https://github.com/.../archive/refs/tags/v1.1.1.tar.gz",
 "integrity": "sha512-nh61D+YySEGcNgN/B3K8CTVe4wqHkbWAVrm1..."
 ```
 
@@ -565,6 +565,11 @@ git push -f origin v1
 ```
 
 ワークフロー側は次の実行から新しい `v1` を拾う。**スクリプト側は tarball の URL を固定しているので自動では追従しない。** 案件ごとに `package.json` の URL のバージョンを上げて `npm i` を流す。
+
+> **タグを打つ前に、この README の導入 URL（手順1）を新しいバージョンへ上げること。**
+> README はタグの中身として配布されるため、`v1.1.1` の中の README が `v1.1.0` を
+> 指していると、そのバージョンを見て入れた新規案件が古い版を掴む。
+> バージョン更新のコミットに含めてしまうのが確実。
 
 **壊れる変更を入れるときは `v1` を動かさない。** `v2` を切って、案件ごとに参照を上げる。
 
