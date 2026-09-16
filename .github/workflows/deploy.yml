@@ -7,7 +7,13 @@ name: Deploy to production
 #       uses: BROMOdesign/xserver-wp-deploy/.github/workflows/deploy.yml@v1
 #       with:
 #         dry_run: ${{ inputs.dry_run || false }}
-#       secrets: inherit
+#       secrets:
+#         XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}
+#
+# secrets: inherit と書いてはいけない。呼び出し元とこのキットの owner が
+# 違うと inherit では鍵が空のまま渡り、スクリプトが ssh-agent へ
+# フォールバックして All configured authentication methods failed で落ちる。
+# 完全な例は examples/caller-workflow.yml にある。
 #
 # このリポジトリは public なので、呼び出し元が private でも認証は不要。
 # セルフホストランナー（サービスアカウントで動く）から npm ci でキットを
