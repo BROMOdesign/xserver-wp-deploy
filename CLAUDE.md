@@ -66,6 +66,23 @@ git push -f origin v1
 
 `npm i -D github:BROMOdesign/xserver-wp-deploy#v1` と書いてはいけない。npm が `git+ssh://` に正規化し、ランナーのサービスアカウントから github.com への SSH が必要になって、public にした意味が消える。
 
+### ★ 履歴を書き換えると、配布済みの案件の `npm ci` が壊れる
+
+GitHub の source tarball は先頭に `pax_global_header` を持ち、`git archive` がそこに
+**コミット SHA を書き込む**。つまり **tree が同一でもコミット SHA が変われば tarball の
+バイト列が変わり、sha512 が変わる。**
+
+案件側の `package-lock.json` は tarball の `integrity` を固定しているので、`npm ci` が
+`EINTEGRITY` で落ちる。2026-09-16 の履歴書き換え（`git filter-repo`）で実際にそうなった。
+
+| タグ | 書き換え前の integrity（案件の lock） | 書き換え後の実測 |
+|---|---|---|
+| `v1.1.0` | `sha512-nh61D+...` | `sha512-HDwkKq...` → **不一致** |
+
+**履歴を書き換えたら、既にキットを入れている案件すべてで `npm i` を流し直す**（lock の
+`integrity` を更新する）必要がある。「tree が同じだから tarball も同じ」は成り立たない。
+
+---
 ## この環境固有の落とし穴
 
 - **Git Bash から `gh secret set` でパスを渡さない。** MSYS のパス変換で `/home/...` が `C:/Program Files/Git/home/...` に書き換わって保存される。PowerShell か GitHub の画面から
