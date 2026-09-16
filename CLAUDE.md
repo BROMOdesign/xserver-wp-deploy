@@ -82,6 +82,30 @@ GitHub の source tarball は先頭に `pax_global_header` を持ち、`git arch
 **履歴を書き換えたら、既にキットを入れている案件すべてで `npm i` を流し直す**（lock の
 `integrity` を更新する）必要がある。「tree が同じだから tarball も同じ」は成り立たない。
 
+#### ★ ただし、すぐには落ちない。時限式であることが本当の罠
+
+**npm のローカルキャッシュに旧 tarball が残っている間は `npm ci` が通ってしまう。**
+壊れているのに緑のまま進むので、気付く機会が無い。
+
+| 条件 | 結果 |
+|---|---|
+| キャッシュあり（`~/.npm` に旧 tarball が残っている） | **通る。** 壊れていることが見えない |
+| キャッシュなし（`npm ci --cache <空ディレクトリ>`） | `EINTEGRITY` で落ちる |
+
+セルフホストランナーは `~/.npm` を持ち越すので、**CI もしばらく通り続ける。**
+キャッシュが消えた日に、履歴書き換えとは無関係に見える障害として噴き出す。
+
+**壊れているかどうかは `npm ci` の成否では判定できない。** 次のどちらかで確かめる。
+
+```bash
+# 1. lock の integrity と実体を直接照合する
+curl -sSL -o /tmp/kit.tar.gz https://github.com/BROMOdesign/xserver-wp-deploy/archive/refs/tags/<tag>.tar.gz
+openssl dgst -sha512 -binary /tmp/kit.tar.gz | openssl base64 -A   # lock の integrity と比べる
+
+# 2. 空のキャッシュで npm ci を流す
+npm ci --cache "$(mktemp -d)"
+```
+
 ---
 ## この環境固有の落とし穴
 
