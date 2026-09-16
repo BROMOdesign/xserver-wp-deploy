@@ -1,0 +1,16 @@
+#!/bin/sh
+# コミットメッセージに、公開してはいけない語が含まれていないか確認する。
+# 本文は後から消すのが差分より遥かに面倒（履歴書き換えが要る）ので、ここで止める。
+. "$(dirname "$0")/_private-names.sh"
+
+re=$(private_names_regex) || exit 0
+[ -n "$re" ] || exit 0
+
+hits=$(grep -n -i -E "$re" "$1")
+[ -n "$hits" ] || exit 0
+
+echo "コミットを中止した。公開してはいけない語がコミットメッセージに含まれている:" >&2
+echo "$hits" | sed 's/^/  /' >&2
+echo "" >&2
+echo "メッセージを直して commit し直す。意図的なら git commit --no-verify。" >&2
+exit 1

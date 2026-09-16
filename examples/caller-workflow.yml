@@ -20,7 +20,7 @@ jobs:
     with:
       dry_run: ${{ inputs.dry_run || false }}
     # secrets: inherit は使わない。呼び出し元とこのキットの owner が違う場合
-    # （例 corp-bromo-web の案件から BROMOdesign のキットを呼ぶ）、inherit では
+    # （例 your-org の案件から BROMOdesign のキットを呼ぶ）、inherit では
     # 鍵が空のまま渡り、スクリプトが ssh-agent へフォールバックして
     # 「All configured authentication methods failed」で落ちる。
     # 明示的に渡せば owner の関係に依存しない。

@@ -1,0 +1,17 @@
+#!/bin/sh
+# ステージした差分に、公開してはいけない語が含まれていないか確認する。
+. "$(dirname "$0")/_private-names.sh"
+
+re=$(private_names_regex) || exit 0
+[ -n "$re" ] || exit 0
+
+# 追加行だけを見る。ファイルヘッダ（+++）は除く。
+# grep -v の除外は必ず -E を付ける。BRE では \+ が繰り返し演算子になり全行が消える。
+hits=$(git diff --cached -U0 | grep -E '^\+' | grep -E -v '^\+\+\+' | grep -i -E "$re")
+[ -n "$hits" ] || exit 0
+
+echo "コミットを中止した。公開してはいけない語がステージした差分に含まれている:" >&2
+echo "$hits" | sed 's/^/  /' >&2
+echo "" >&2
+echo "直してから commit し直す。意図的なら git commit --no-verify。" >&2
+exit 1

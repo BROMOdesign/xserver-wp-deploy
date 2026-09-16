@@ -275,7 +275,7 @@ jobs:
     with:
       dry_run: ${{ inputs.dry_run || false }}
     # secrets: inherit は使わない。呼び出し元とこのキットの owner が違う場合
-    # （例 corp-bromo-web の案件から BROMOdesign のキットを呼ぶ）、inherit では
+    # （例 your-org の案件から BROMOdesign のキットを呼ぶ）、inherit では
     # 鍵が空のまま渡り、スクリプトが ssh-agent へフォールバックして
     # 「All configured authentication methods failed」で落ちる。
     # 明示的に渡せば owner の関係に依存しない。
@@ -290,7 +290,7 @@ jobs:
 
 同じものがキットのリポジトリの `examples/caller-workflow.yml` にも置いてある。
 
-**`secrets: inherit` と書いてはいけない。** 案件リポジトリとこのキットの owner が違うと（例: `corp-bromo-web` の案件から `BROMOdesign` のキットを呼ぶ）、`inherit` では鍵が空のまま渡る。スクリプトは `XSERVER_SSH_KEY` が無ければ ssh-agent へフォールバックする作りなので、ランナーのサービスアカウント（NETWORK SERVICE）にエージェントが無く、こう落ちる。
+**`secrets: inherit` と書いてはいけない。** 案件リポジトリとこのキットの owner が違うと（例: `your-org` の案件から `BROMOdesign` のキットを呼ぶ）、`inherit` では鍵が空のまま渡る。スクリプトは `XSERVER_SSH_KEY` が無ければ ssh-agent へフォールバックする作りなので、ランナーのサービスアカウント（NETWORK SERVICE）にエージェントが無く、こう落ちる。
 
 ```
 認証:       ssh-agent（\\.\pipe\openssh-ssh-agent）
@@ -611,6 +611,20 @@ git push -f origin v1
 - 「設定 → プライバシー」などのオプション
 
 **サーバー上で直接編集したファイルは削除される。** ローカルに無いファイルは消す仕様なので、本番を FTP で直接いじる運用が残っているなら注意。
+
+---
+
+## このリポジトリを触るとき
+
+public なので、**案件名やクライアント名を README・コミットメッセージ・PR 本文に書かない。** 一度 push すると PR の `refs/pull/*` に残り、後から消すのが非常に面倒になる。
+
+`.githooks/` にそれを弾くフックがある。clone したら一度だけ有効にする。
+
+```bash
+git config core.hooksPath .githooks
+```
+
+弾く語のリストはこのリポジトリには置かない（置いたら本末転倒）。`~/.config/git/private-names.txt` に1行1パターンで書く。ファイルが無ければフックは素通りする。
 
 ---
 
