@@ -401,6 +401,10 @@ async function upload(sftp, remoteRoot, rel) {
 	}
 
 	await sftp.put(path.join(ROOT, rel), remotePath);
+	// put() は権限を指定しないと 0o666 を送り、エックスサーバーの SFTP はそれを umask で削らない。
+	// 新規作成だけでなく上書きでも 666 に戻る（644 にしたファイルへ put し直して確かめた）。
+	// 他人が書き込めるファイルを残さないよう、送るたびに 644 へ直す。
+	await sftp.chmod(remotePath, 0o644);
 }
 
 // ------------------------------------------------------------------
