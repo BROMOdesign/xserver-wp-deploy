@@ -194,7 +194,7 @@ GitHub ホストランナーは国外 IP なので、「国内のみ許可」の
 テーマのリポジトリで実行する。**tarball の URL で入れること。**
 
 ```bash
-npm i -D https://github.com/BROMOdesign/xserver-wp-deploy/archive/refs/tags/v1.1.1.tar.gz
+npm i -D https://github.com/BROMOdesign/xserver-wp-deploy/archive/refs/tags/v1.1.2.tar.gz
 ```
 
 `npm i -D github:BROMOdesign/xserver-wp-deploy#v1` と書いてはいけない。npm が
@@ -592,6 +592,7 @@ git push -f origin v1
 | Secrets は登録済みなのに `All configured authentication methods failed` | 案件とキットの owner が違い、`secrets: inherit` では鍵が空のまま渡っていた。スクリプトが ssh-agent にフォールバックし、NETWORK SERVICE にエージェントが無いので失敗する | 呼び出し側で `secrets: XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}` と明示的に渡す。ログの「認証:」行で切り分けられる |
 | 作った CI 専用鍵で入れない | PowerShell から `ssh-keygen -N ""` を実行し、リテラルの `""` がパスフレーズになっていた | `ssh-keygen -p -P '""' -N '' -f <鍵>` で外す。鍵の作り直しは不要 |
 | デプロイ直後だけ古い画像が返る | エックスサーバーのエッジキャッシュ。サーバー上の実ファイルは新しい | 数十秒待つか `?v=<何か>` を付けて確認する。実体は `ssh` で `ls -l` すれば確かめられる |
+| デプロイしたファイルの権限が `-rw-rw-rw-`（666）になる | `ssh2` の `put()` は権限を指定しないと 0o666 で作らせ、エックスサーバーの SFTP はそれを umask で削らない。上書きでも 666 に戻る。同じサーバーの他のアカウントがパスを知っていれば書き込める | 1.1.2 から送るたびに `chmod 644` する。それより前に送ったファイルは 666 のまま残る。直しても、古い版で送り直すとまた 666 になるので、案件の参照を 1.1.2 に上げてから、サーバーで `find <テーマ> -type f -perm -0002 -exec chmod go-w {} +` で直す |
 
 ### 毎回すべて送っている理由
 
