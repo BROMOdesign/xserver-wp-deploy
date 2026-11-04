@@ -41,6 +41,13 @@ on:
         description: 'ビルドコマンド'
         type: string
         default: 'npm run build'
+      # 同じテーマを複数の WordPress に出すとき（サブディレクトリに別の WordPress がある等）、
+      # XSERVER_DEPLOY_PATH で転送先を変えたジョブのヘルスチェックを、その WordPress の URL に向ける。
+      # 空なら deploy.config.json の healthcheck.baseUrl を見る（従来どおり）。
+      healthcheck_url:
+        description: 'ヘルスチェックの URL。空なら deploy.config.json の healthcheck.baseUrl'
+        type: string
+        default: ''
     secrets:
       # 鍵だけが本当の秘密。ホスト・ユーザー・パスは deploy.config.json の
       # server に書けるので、案件ごとに登録する Secrets はこれ1つで済む。
@@ -126,3 +133,6 @@ jobs:
       - name: ヘルスチェック
         if: ${{ !inputs.dry_run }}
         run: npm exec --no -- xwp-healthcheck
+        # healthcheck.mjs は DEPLOY_URL を baseUrl より優先する。空文字なら baseUrl に落ちる
+        env:
+          DEPLOY_URL: ${{ inputs.healthcheck_url }}

@@ -194,7 +194,7 @@ GitHub ホストランナーは国外 IP なので、「国内のみ許可」の
 テーマのリポジトリで実行する。**tarball の URL で入れること。**
 
 ```bash
-npm i -D https://github.com/BROMOdesign/xserver-wp-deploy/archive/refs/tags/v1.1.2.tar.gz
+npm i -D https://github.com/BROMOdesign/xserver-wp-deploy/archive/refs/tags/v1.2.0.tar.gz
 ```
 
 `npm i -D github:BROMOdesign/xserver-wp-deploy#v1` と書いてはいけない。npm が
@@ -552,6 +552,35 @@ npm run deploy
 | ランナーを入れる | `setup-runner.ps1 -Repo <owner>/<repo>`（管理者 PowerShell） |
 
 **CI が要らない案件ならランナーは省ける。** スクリプトは ssh-agent 経由の認証に対応しているので、ローカルから `npm run deploy` だけで完結する。「タグを打ったら自動」が欲しい案件にだけ入れればよい。
+
+### 同じテーマを複数の WordPress に出す
+
+同じサーバーアカウントに、同じテーマを使う WordPress が複数ある場合（サブディレクトリに別の WordPress を置いた等）は、呼び出し側のワークフローにジョブを足す。`deploy.config.json` は1つのまま。
+
+```yaml
+jobs:
+  deploy:
+    uses: BROMOdesign/xserver-wp-deploy/.github/workflows/deploy.yml@v1
+    with:
+      dry_run: ${{ inputs.dry_run || false }}
+    secrets:
+      XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}
+
+  deploy-sub:
+    needs: deploy            # 並走させない。1つ目が失敗したら2つ目は出さない
+    uses: BROMOdesign/xserver-wp-deploy/.github/workflows/deploy.yml@v1
+    with:
+      dry_run: ${{ inputs.dry_run || false }}
+      healthcheck_url: https://example.com/sub
+    secrets:
+      XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}
+      XSERVER_DEPLOY_PATH: ${{ secrets.XSERVER_DEPLOY_PATH_SUB }}
+```
+
+- **転送先は Secrets の `XSERVER_DEPLOY_PATH` で上書きする。** パス自体は秘密ではないが、ワークフローは転送先の上書きを Secrets でしか受け取らない。登録は PowerShell か GitHub の画面から（Git Bash だとパスが書き換わる。「4. GitHub Secrets を登録する」）
+- **ヘルスチェックの URL は `healthcheck_url` で渡す。** 渡さないと、2つ目のジョブも `deploy.config.json` の `healthcheck.baseUrl`（1つ目の WordPress）を検査してしまう。`themeUrlPath` などのパスは、この URL を起点に解決される
+- `themeMarker` はテーマの `style.css` を見るので、同じテーマならどちらの転送先でもそのまま効く
+- 2つ目の転送先への初回投入はローカルから `--init` 付きで行う（「6. 動作確認」）。ローカルからは `XSERVER_DEPLOY_PATH=<パス> npx xwp-deploy --dry-run`、`npx xwp-healthcheck https://example.com/sub` で同じことができる
 
 ### キットを更新する
 
